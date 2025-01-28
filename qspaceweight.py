@@ -5,13 +5,19 @@ into a Siemens-readable format. Support variable number of
 b-value=0 volumes, their interspersion in the sequeqnce, and
 multiple b-values.
 
-Example
--------
+Examples
+--------
 python qspaceweight.py \
     --unitary-schema samples.txt \
     --num-b0 5 \
     --intersperse \
     --bvalues 1000 2000 3000
+
+python qspaceweight.py \
+    -u samples.txt \
+    -n 5 \
+    -i \
+    -b 1000 2000 3000
 
 """
 
@@ -30,6 +36,13 @@ def get_args():
     parser = ArgumentParser(
         description=__doc__, formatter_class=RawTextHelpFormatter
     )
+    parser.add_argument(
+        "-i",
+        "--intersperse",
+        action="store_true",
+        help="Intersperse B0 volumes.",
+    )
+
     required_args = parser.add_argument_group("Required Arguments")
     required_args.add_argument(
         "-u",
@@ -46,14 +59,7 @@ def get_args():
         required=True,
     )
     required_args.add_argument(
-        "-i",
-        "--intersperse",
-        action="store_true",
-        help="Interseprse B0 volumes.",
-        required=True,
-    )
-    required_args.add_argument(
-        "-v",
+        "-b",
         "--bvalues",
         nargs="+",
         type=int,
@@ -69,12 +75,10 @@ def get_args():
     return parser
 
 
-def intersperse_b0(directions: list, num_b0: int) -> list:
-    """Intersperse b0 volumes throughout scan.
+def distribute_b0(directions: list, num_b0: int) -> list:
+    """Distribute b-value=0 volumes throughout scan.
 
-    Function to intersperse a given number of b-value=0 volumes in
-    between the original directions. It assumes the scanner will
-    collect a first b-value=0 volume at the beginning of the acquisition.
+    First volume is b-value=0.
 
     Parameters
     ----------
@@ -88,44 +92,34 @@ def intersperse_b0(directions: list, num_b0: int) -> list:
     list : direction list with intersperse b-value=0 volumes.
 
     """
-    # To intersperse num_b0 b=0 volumes more or less equidistant in between the N
-    # DW images we should divide the N volumes in (num_b0+1) blocks, with each of
-    # the num_b0 first blocks having a b=0 volumes at the end, and the last block
-    # not having any.
+    # Manage one b-zero
+    b_zero = "( 0.000, 0.000, 0.000 )"
+    if num_b0 == 1:
+        return [b_zero] + directions
 
-    N = len(directions)  # number of original directions
-    n_blocks = N // num_b0 + 1  # number of blocks (equivalent of "ceil")
-    vec_per_block = N // int(
-        n_blocks
-    )  # number of points (directions) per block (equiv. of "floor")
+    # Determine block size
+    num_dir = len(directions)
+    block_size = num_dir // (num_b0 - 1)  # Account for starting b0
 
-    intersperse_directions = [None] * (N + num_b0)
-    c_out = 0  # counter for out_dirs
-    c_in = 0  # counter for input_dirs
-    for _ in range(n_blocks):
+    # Start with b-value=0 volume, distribute b-zeroes
+    new_dir = [b_zero]
+    cnt_add_bval = 1
+    for idx, vec in enumerate(directions):
+        new_dir.append(vec)
+        if ((idx + 1) % block_size) == 0:
+            cnt_add_bval += 1
+            new_dir.append(b_zero)
 
-        # copy the next block from the input:
-        intersperse_directions[c_out : c_out + vec_per_block] = directions[
-            c_in : c_in + vec_per_block
-        ]
-        c_out += vec_per_block
-        c_in += vec_per_block
+    # Catch-all by adding enough b_zero on end
+    while cnt_add_bval < num_b0:
+        new_dir.append(b_zero)
+        cnt_add_bval += 1
 
-        # introduce a b-value = 0:
-        intersperse_directions[c_out] = "( 0.000, 0.000, 0.000 )"
-        c_out += 1
-
-    # last block (it might not have 'vec_per_block' pc_outnts,
-    # but just a few left):
-    vec_left = (
-        N + num_b0 - c_out
-    )  # how many pc_outnts/vectors/directions we have left
-    for _ in range(vec_left):
-        intersperse_directions[c_out] = directions[c_in]
-        c_out += 1
-        c_in += 1
-
-    return intersperse_directions
+    if cnt_add_bval != num_b0:
+        raise ValueError(
+            "Mismatch between requested and distributed b0 volumes."
+        )
+    return new_dir
 
 
 def read_unitary(unitary_schema: PT) -> tuple:
@@ -232,8 +226,8 @@ def write_siemens(
 
     # Account for interspersal request
     if intersperse:
-        directions_intersperse = intersperse_b0(directions, num_b0)
-        for n, vec in enumerate(directions_intersperse):
+        directions = distribute_b0(directions, num_b0)
+        for n, vec in enumerate(directions):
             siemens_info += f"Vector[{n}] = {vec}\n"
         _write_file(siemens_file, siemens_info)
         return
@@ -242,10 +236,10 @@ def write_siemens(
     n = 0
     for _ in range(num_b0):
         siemens_info += f"Vector[{n}] = ( 0.000, 0.000, 0.000 )\n"
-        n = n + 1
+        n += 1
     for vec in directions:
         siemens_info += f"Vector[{n}] = {vec}\n"
-        n = n + 1
+        n += 1
     _write_file(siemens_file, siemens_info)
 
 
