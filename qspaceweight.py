@@ -209,7 +209,7 @@ def write_siemens(
         ### sampling script by Emmanuel Caruyer
         ### http://www.emmanuelcaruyer.com/q-space-sampling.php
         ###
-        ### Uniformly distributed directions in 3 shells
+        ### Uniformly distributed directions in {num_shell} shells
         ### (bvalue ratio = {bval_ratio})
         ### {', '.join(bval_list)}, b =0x{num_b0}
 
