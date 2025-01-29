@@ -14,9 +14,10 @@ python qspaceweight.py \
     --bvalues 1000 2000 3000
 
 python qspaceweight.py \
-    -u samples.txt \
+    -u ~/Desktop/samples.txt \
     -n 5 \
     -i \
+    -r \
     -b 1000 2000 3000
 
 """
@@ -26,6 +27,7 @@ import sys
 import pandas as pd
 import numpy as np
 import textwrap
+import random
 from argparse import ArgumentParser, RawTextHelpFormatter
 
 type PT = str | os.PathLike
@@ -41,6 +43,12 @@ def get_args():
         "--intersperse",
         action="store_true",
         help="Intersperse B0 volumes.",
+    )
+    parser.add_argument(
+        "-r",
+        "--randomize",
+        action="store_true",
+        help="Randomize direction order.",
     )
 
     required_args = parser.add_argument_group("Required Arguments")
@@ -133,6 +141,11 @@ def read_unitary(unitary_schema: PT) -> tuple:
         names=["shell", "x", "y", "z"],
     )
     df_sample = df_sample.round({"x": 6, "y": 6, "z": 6})
+
+    # Account for 0-vs-1 indexing
+    shell_list = list(df_sample["shell"].unique())
+    if 0 in shell_list:
+        df_sample["shell"] = df_sample["shell"] + 1
     schema = df_sample.to_numpy()
 
     # Determine shell counts as sorted dict
@@ -144,7 +157,7 @@ def read_unitary(unitary_schema: PT) -> tuple:
     return (schema, shell_counts)
 
 
-def organize_schema(bvalues: list, schema: np.ndarray) -> list:
+def organize_schema(bvalues: list, schema: np.ndarray, rand: bool) -> list:
     """Organize schema np.ndarray into list of directions."""
     directions = []
     maxb = max(bvalues)
@@ -159,6 +172,9 @@ def organize_schema(bvalues: list, schema: np.ndarray) -> list:
         vec = xyz * weight
         vec = vec.round(6)
         directions.append(f"( {vec[0]}, {vec[1]}, {vec[2]} )")
+
+    if rand:
+        random.shuffle(directions)
     return directions
 
 
@@ -251,6 +267,7 @@ def main():
     intersperse = args.intersperse
     bvalues = np.array(args.bvalues)
     num_b0 = args.num_b0
+    rand = args.randomize
 
     # Read unitary
     out_dir = os.path.dirname(unitary_schema)
@@ -271,7 +288,7 @@ def main():
         )
 
     # Organize schema, write siemens file
-    directions = organize_schema(bvalues, schema)
+    directions = organize_schema(bvalues, schema, rand)
     write_siemens(directions, num_b0, bval_counts, intersperse, out_dir)
 
 
